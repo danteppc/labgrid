@@ -27,6 +27,10 @@ Quick Start
    venv $ ./contrib/labgrid-webapp
    INFO:     Available routes:
    INFO:       - /labgrid/graph
+   INFO:       - /labgrid/resources
+   INFO:       - /labgrid/places
+   INFO:       - /labgrid/places/{name}/acquire
+   INFO:       - /labgrid/places/{name}/release
    INFO:     Started server process [2378028]
    INFO:     Waiting for application startup.
    INFO:     Application startup complete.
@@ -39,5 +43,12 @@ installation. See http://graphviz.org/download/
 By default the application will start on port 8800.
 
 To see the graph, go to http://0.0.0.0:8800/labgrid/graph
+
+Other endpoints provide coordinator data and basic control:
+
+- http://0.0.0.0:8800/labgrid/resources
+- http://0.0.0.0:8800/labgrid/places
+- POST http://0.0.0.0:8800/labgrid/places/{name}/acquire
+- POST http://0.0.0.0:8800/labgrid/places/{name}/release
 
 See http://0.0.0.0:8800/docs for more information on available endpoints.
