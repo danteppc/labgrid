@@ -7,12 +7,14 @@ import sys
 from typing import Dict
 
 import graphviz
+import grpc
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 
 from labgrid.remote.client import ClientSession, start_session
 from labgrid.remote.common import Place
+from labgrid.remote.generated import labgrid_coordinator_pb2
 from labgrid.resource import Resource
 from labgrid.util.proxy import proxymanager
 
@@ -113,6 +115,46 @@ def main():
         '''Show a graph of the current infrastructure.'''
         svg = await do_graph(session)
         return Response(content=svg, media_type='image/svg+xml')
+
+    @app.get('/labgrid/resources')
+    async def list_resources() -> Dict[str, Dict]:
+        '''Return all resources known to the coordinator.'''
+        await session.sync_with_coordinator()
+        return session.resources
+
+    @app.get('/labgrid/places')
+    async def list_places() -> Dict[str, Dict]:
+        '''Return all places known to the coordinator.'''
+        await session.sync_with_coordinator()
+        return {
+            name: {
+                'acquired': place.acquired,
+                'tags': place.tags,
+            }
+            for name, place in session.places.items()
+        }
+
+    @app.post('/labgrid/places/{name}/acquire')
+    async def acquire_place(name: str):
+        '''Acquire the specified place.'''
+        request = labgrid_coordinator_pb2.AcquirePlaceRequest(placename=name)
+        try:
+            await session.stub.AcquirePlace(request)
+            await session.sync_with_coordinator()
+        except grpc.aio.AioRpcError as exc:
+            raise HTTPException(status_code=400, detail=exc.details()) from exc
+        return {'status': 'acquired', 'place': name}
+
+    @app.post('/labgrid/places/{name}/release')
+    async def release_place(name: str):
+        '''Release the specified place.'''
+        request = labgrid_coordinator_pb2.ReleasePlaceRequest(placename=name)
+        try:
+            await session.stub.ReleasePlace(request)
+            await session.sync_with_coordinator()
+        except grpc.aio.AioRpcError as exc:
+            raise HTTPException(status_code=400, detail=exc.details()) from exc
+        return {'status': 'released', 'place': name}
 
     parser = argparse.ArgumentParser(
         description='Labgrid webapp',
