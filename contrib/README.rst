@@ -41,3 +41,16 @@ By default the application will start on port 8800.
 To see the graph, go to http://0.0.0.0:8800/labgrid/graph
 
 See http://0.0.0.0:8800/docs for more information on available endpoints.
+
+Web Interface
+-------------
+
+The application also provides a very small interface on ``/``.  From this page
+the labgrid coordinator and an exporter can be started and basic client
+commands can be executed without using the CLI.
+
+The included ``webapp-exporter.yaml`` contains a minimal configuration which
+exports an SSH resource for ``127.0.0.1``.  After starting the webapp, open the
+root page in a browser and use the buttons to start the coordinator and
+exporter.  The SSH form can then be used to run commands on the configured
+device.
