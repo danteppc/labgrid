@@ -8,8 +8,8 @@ from typing import Dict
 
 import graphviz
 import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import Response
+from fastapi import FastAPI, Form
+from fastapi.responses import HTMLResponse, Response
 
 from labgrid.remote.client import ClientSession, start_session
 from labgrid.remote.common import Place
@@ -108,9 +108,90 @@ def main():
     app = FastAPI()
     logger = logging.getLogger('uvicorn')
 
+    coordinator_proc = None
+    exporter_proc = None
+    session = None
+
+    async def run_command(*cmd: str) -> str:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await proc.communicate()
+        return stdout.decode()
+
+    def render_index(message: str = "") -> str:
+        return f"""
+        <html>
+        <body>
+        <h1>Labgrid Web Interface</h1>
+        <form action='/coordinator/start' method='post'>
+            <button type='submit'>Start Coordinator</button>
+        </form>
+        <form action='/exporter/start' method='post'>
+            <label>Config: <input name='config' value='contrib/webapp-exporter.yaml'/></label>
+            <button type='submit'>Start Exporter</button>
+        </form>
+        <form action='/client/ssh' method='post'>
+            <label>Place: <input name='place' value='webapp-place'/></label>
+            <label>Command: <input name='command' value='hostname'/></label>
+            <button type='submit'>SSH</button>
+        </form>
+        <pre>{message}</pre>
+        </body>
+        </html>
+        """
+
+    @app.get("/", response_class=HTMLResponse)
+    async def index() -> str:
+        return render_index()
+
+    @app.post("/coordinator/start", response_class=HTMLResponse)
+    async def start_coordinator() -> str:
+        nonlocal coordinator_proc, session
+        if coordinator_proc and coordinator_proc.returncode is None:
+            return render_index("Coordinator already running")
+        coordinator_proc = await asyncio.create_subprocess_exec("labgrid-coordinator")
+        await asyncio.sleep(0.5)
+        if session is None:
+            session = start_session(args.coordinator, loop=loop)
+        return render_index("Coordinator started")
+
+    @app.post("/exporter/start", response_class=HTMLResponse)
+    async def start_exporter(config: str = Form(...)) -> str:
+        nonlocal exporter_proc
+        if exporter_proc and exporter_proc.returncode is None:
+            return render_index("Exporter already running")
+        exporter_proc = await asyncio.create_subprocess_exec(
+            "labgrid-exporter", "-c", config
+        )
+        return render_index("Exporter started")
+
+    @app.post("/client/ssh", response_class=HTMLResponse)
+    async def client_ssh(
+        place: str = Form("webapp-place"), command: str = Form("hostname")
+    ) -> str:
+        await run_command("labgrid-client", "-p", place, "create")
+        await run_command(
+            "labgrid-client",
+            "-p",
+            place,
+            "add-match",
+            "*/webapp/NetworkService/ssh",
+        )
+        await run_command("labgrid-client", "-p", place, "acquire")
+        cmd = ["labgrid-client", "-p", place, "ssh"]
+        if command:
+            cmd.append(command)
+        output = await run_command(*cmd)
+        return render_index(output)
+
     @app.get('/labgrid/graph')
     async def get_graph() -> str:
         '''Show a graph of the current infrastructure.'''
+        if session is None:
+            return Response(content='Coordinator not connected', media_type='text/plain')
         svg = await do_graph(session)
         return Response(content=svg, media_type='image/svg+xml')
 
@@ -142,8 +223,8 @@ def main():
             loop=loop,
         )
     except ConnectionRefusedError:
-        logger.fatal('Unable to connect to labgrid coordinator')
-        return
+        logger.warning('Unable to connect to labgrid coordinator')
+        session = None
 
     server = uvicorn.Server(config=uvicorn.Config(
         loop=loop,
@@ -161,8 +242,9 @@ def main():
     try:
         loop.run_until_complete(server.serve())
     finally:
-        loop.run_until_complete(session.stop())
-        loop.run_until_complete(session.close())
+        if session:
+            loop.run_until_complete(session.stop())
+            loop.run_until_complete(session.close())
 
 
 if __name__ == '__main__':
